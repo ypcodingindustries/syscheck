@@ -1,0 +1,99 @@
+#!/bin/bash
+# CONFIG
+BIRTHDAY="2026-02-04"
+# AG_USER removed for security
+# AG_PASS removed for security
+AG_IP="100.96.42.118"
+
+# COLORS
+G='\033[0;32m'
+Y='\033[1;33m'
+R='\033[0;31m'
+NC='\033[0m'
+
+# SYSTEM STATS
+RAM_TOTAL=$(free -m | awk '/Mem:/ { print $2 }')
+RAM_USED=$(free -m | awk '/Mem:/ { print $3 }')
+RAM_PERC=$(( RAM_USED * 100 / RAM_TOTAL ))
+
+draw_bar() {
+    local perc=$1
+    local is_life=$2
+    local fill=$(( perc / 5 ))
+    if [[ "$is_life" == "true" && "$fill" -eq 0 ]]; then fill=1; fi
+    local COLOR=$G
+    if [ "$perc" -ge 90 ]; then COLOR=$R; elif [ "$perc" -ge 70 ]; then COLOR=$Y; fi
+    local bar=""
+    for ((i=0; i<fill; i++)); do bar+="█"; done
+    echo -ne "${COLOR}${bar}${NC}"
+    local empty=$(( 20 - fill ))
+    for ((i=0; i<empty; i++)); do echo -n " "; done
+}
+
+# NETWORK SPEED
+INTERFACE="ens3"
+R1=$(cat /sys/class/net/$INTERFACE/statistics/rx_bytes)
+T1=$(cat /sys/class/net/$INTERFACE/statistics/tx_bytes)
+sleep 1
+R2=$(cat /sys/class/net/$INTERFACE/statistics/rx_bytes)
+T2=$(cat /sys/class/net/$INTERFACE/statistics/tx_bytes)
+RX_BPS=$(( (R2 - R1) / 1024 ))
+TX_BPS=$(( (T2 - T1) / 1024 ))
+CPU_VAL=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1}' | cut -d. -f1)
+DISK_PERC=$(df / | awk 'NR==2 {print $5}' | sed 's/%//')
+
+# LIFE CALCULATION
+START_SEC=$(date -d "$BIRTHDAY" +%s)
+NOW_SEC=$(date +%s)
+DAYS_SINCE=$(( (NOW_SEC - START_SEC) / 86400 ))
+UP_PERC=$(( DAYS_SINCE * 100 / 365 ))
+
+# SECURITY & LOGS
+LOG="/var/log/fail2ban.log"
+TOTAL_DEFLECTED=$(grep -c "Ban " $LOG 2>/dev/null || echo "0")
+RECIDIVE_COUNT=$(grep "recidive" $LOG 2>/dev/null | grep -c "Ban " || echo "0")
+FAILED_SSH=$(journalctl _COMM=sshd --since "24 hours ago" 2>/dev/null | grep -c "Failed password")
+
+# NETWORK & TAILSCALE
+TS_IP=$(tailscale ip -4 2>/dev/null || echo "127.0.0.1")
+ACTIVE_PEERS=$(tailscale status 2>/dev/null | grep "active" | grep -v "$TS_IP" | awk '{print $2}' | tr '\n' ' ')
+[ -z "$ACTIVE_PEERS" ] && ACTIVE_PEERS="None (Lone Wolf)"
+
+# ADGUARD DATA FETCH
+AG_DATA=$(curl -s -u "${AG_USER}:${AG_PASS}" "http://${AG_IP}:8080/control/stats")
+TOTAL_Q=$(echo "$AG_DATA" | grep -o '"num_dns_queries":[0-9]*' | cut -d: -f2)
+BLOCKED=$(echo "$AG_DATA" | grep -o '"num_blocked_filtering":[0-9]*' | cut -d: -f2)
+
+if [[ -z "$BLOCKED" ]]; then
+    AG_DISPLAY="${R}Offline${NC}"
+else
+    PERC=0
+    if [[ "$TOTAL_Q" -gt 0 ]]; then
+        PERC=$(( 100 * BLOCKED / TOTAL_Q ))
+    fi
+    AG_DISPLAY="${R}${BLOCKED}${NC} blocks (${G}${PERC}%${NC})"
+fi
+
+# DISPLAY
+fastfetch
+echo "----------------------------------------------------------------------------------"
+echo -ne " RAM:   ["; draw_bar $RAM_PERC; echo -e "] $RAM_PERC% (${RAM_USED}MB / ${RAM_TOTAL}MB)"
+echo -ne " CPU:   ["; draw_bar $CPU_VAL; echo -e "] $CPU_VAL%"
+echo -ne " DISK:  ["; draw_bar $DISK_PERC; echo -e "] $DISK_PERC%"
+echo -ne " LIFE:  ["; draw_bar $UP_PERC "true"; echo -e "] $DAYS_SINCE / 365 Days"
+echo "----------------------------------------------------------------------------------"
+echo -e " \033[1;31mSECURITY CARNAGE\033[0m"
+echo "----------------------------------------------------------------------------------"
+echo -e " BANS:    ${R}${TOTAL_DEFLECTED}${NC} Attacks | Recidive: ${Y}${RECIDIVE_COUNT}${NC}"
+echo -e " THREATS: ${R}${FAILED_SSH}${NC} Failed SSH attempts (24h)"
+echo -e " TRAFFIC: ↓ ${G}${RX_BPS}${NC} KB/s | ↑ ${G}${TX_BPS}${NC} KB/s"
+echo -e " NETWORK: Tailscale: ${G}${TS_IP}${NC}"
+echo -e " ACTIVE:  ${Y}${ACTIVE_PEERS}${NC}"
+echo -e " ADGUARD: ${AG_DISPLAY}"
+CADDY_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:2019/metrics)
+if [ "$CADDY_CHECK" == "200" ]; then C_STATUS="${G}Online${NC}"; else C_STATUS="${R}Offline${NC}"; fi
+echo -e " CADDY:    ${C_STATUS}"
+HD_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/)
+if [ "$HD_CHECK" == "200" ]; then HD_STATUS="${G}Online${NC}"; else HD_STATUS="${R}Offline${NC}"; fi
+echo -e " HEDGEDOC: ${HD_STATUS}"
+echo "----------------------------------------------------------------------------------"
