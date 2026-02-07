@@ -1,99 +1,106 @@
 #!/bin/bash
 # CONFIG
 BIRTHDAY="2026-02-04"
-# AG_USER removed for security
-# AG_PASS removed for security
 AG_IP="100.96.42.118"
+DAILY_QUOTA=25 # GB
 
 # COLORS
-G='\033[0;32m'
+B='\033[1;34m' 
 Y='\033[1;33m'
 R='\033[0;31m'
 NC='\033[0m'
 
-# SYSTEM STATS
-RAM_TOTAL=$(free -m | awk '/Mem:/ { print $2 }')
-RAM_USED=$(free -m | awk '/Mem:/ { print $3 }')
-RAM_PERC=$(( RAM_USED * 100 / RAM_TOTAL ))
-
-draw_bar() {
+# VERIFIED BAR FUNCTION
+get_bar() {
     local perc=$1
-    local is_life=$2
+    local is_min_needed=$2
     local fill=$(( perc / 5 ))
-    if [[ "$is_life" == "true" && "$fill" -eq 0 ]]; then fill=1; fi
-    local COLOR=$G
-    if [ "$perc" -ge 90 ]; then COLOR=$R; elif [ "$perc" -ge 70 ]; then COLOR=$Y; fi
+    if [[ "$is_min_needed" == "true" && "$fill" -eq 0 && "$perc" -gt 0 ]]; then
+        fill=1
+    fi
+    (( fill > 20 )) && fill=20
+    local COLOR=$B
+    [[ "$perc" -ge 70 ]] && COLOR=$Y
+    [[ "$perc" -ge 90 ]] && COLOR=$R
     local bar=""
     for ((i=0; i<fill; i++)); do bar+="█"; done
-    echo -ne "${COLOR}${bar}${NC}"
     local empty=$(( 20 - fill ))
-    for ((i=0; i<empty; i++)); do echo -n " "; done
+    for ((i=0; i<empty; i++)); do bar+=" "; done
+    echo -e "${COLOR}${bar}${NC}"
 }
 
-# NETWORK SPEED
-INTERFACE="ens3"
-R1=$(cat /sys/class/net/$INTERFACE/statistics/rx_bytes)
-T1=$(cat /sys/class/net/$INTERFACE/statistics/tx_bytes)
-sleep 1
-R2=$(cat /sys/class/net/$INTERFACE/statistics/rx_bytes)
-T2=$(cat /sys/class/net/$INTERFACE/statistics/tx_bytes)
-RX_BPS=$(( (R2 - R1) / 1024 ))
-TX_BPS=$(( (T2 - T1) / 1024 ))
-CPU_VAL=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1}' | cut -d. -f1)
-DISK_PERC=$(df / | awk 'NR==2 {print $5}' | sed 's/%//')
+# STATS
+RAM_T=$(free -m | awk '/Mem:/ { print $2 }')
+RAM_U=$(free -m | awk '/Mem:/ { print $3 }')
+RAM_P=$(( RAM_U * 100 / RAM_T ))
+CPU_V=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1}' | cut -d. -f1)
+DISK_P=$(df / | awk 'NR==2 {print $5}' | sed 's/%//')
+DAYS=$(( ($(date +%s) - $(date -d "$BIRTHDAY" +%s)) / 86400 ))
+LIFE_P=$(( DAYS * 100 / 365 ))
+[[ "$DAYS" -gt 0 && "$LIFE_P" -eq 0 ]] && LIFE_P=1
 
-# LIFE CALCULATION
-START_SEC=$(date -d "$BIRTHDAY" +%s)
-NOW_SEC=$(date +%s)
-DAYS_SINCE=$(( (NOW_SEC - START_SEC) / 86400 ))
-UP_PERC=$(( DAYS_SINCE * 100 / 365 ))
+# BANDWIDTH
+BW_DATA=$(vnstat -i ens3 -d --oneline | cut -d';' -f4)
+BW_VAL=$(echo $BW_DATA | awk '{print $1}')
+BW_UNIT=$(echo $BW_DATA | awk '{print $2}')
+if [[ "$BW_UNIT" == "MiB" ]]; then BW_PERC=1; elif [[ "$BW_UNIT" == "TiB" ]]; then BW_PERC=100; else
+    BW_PERC=$(echo "$BW_VAL $DAILY_QUOTA" | awk '{printf "%d", ($1*100)/$2}')
+    [[ $(echo "$BW_VAL > 0" | bc -l) -eq 1 && "$BW_PERC" -eq 0 ]] && BW_PERC=1
+fi
 
-# SECURITY & LOGS
+# SECURITY
 LOG="/var/log/fail2ban.log"
-TOTAL_DEFLECTED=$(grep -c "Ban " $LOG 2>/dev/null || echo "0")
-RECIDIVE_COUNT=$(grep "recidive" $LOG 2>/dev/null | grep -c "Ban " || echo "0")
+TOTAL_DEF=$(grep -c "Ban " $LOG 2>/dev/null || echo "0")
+RECIDIVE=$(grep "recidive" $LOG 2>/dev/null | grep -c "Ban " || echo "0")
 FAILED_SSH=$(journalctl _COMM=sshd --since "24 hours ago" 2>/dev/null | grep -c "Failed password")
-
-# NETWORK & TAILSCALE
 TS_IP=$(tailscale ip -4 2>/dev/null || echo "127.0.0.1")
-ACTIVE_PEERS=$(tailscale status 2>/dev/null | grep "active" | grep -v "$TS_IP" | awk '{print $2}' | tr '\n' ' ')
-[ -z "$ACTIVE_PEERS" ] && ACTIVE_PEERS="None (Lone Wolf)"
 
-# ADGUARD DATA FETCH
-AG_DATA=$(curl -s -u "${AG_USER}:${AG_PASS}" "http://${AG_IP}:8080/control/stats")
+# PRE-CALC BARS
+R_BAR=$(get_bar $RAM_P "false")
+C_BAR=$(get_bar $CPU_V "false")
+D_BAR=$(get_bar $DISK_P "false")
+L_BAR=$(get_bar $LIFE_P "true")
+BW_BAR=$(get_bar $BW_PERC "true")
+
+# HEALTH LOGIC (The fix for your missing bar)
+if [ -f /var/run/reboot-required ]; then
+    H_S="${R}REBOOT NEEDED${NC}"
+    H_B="${R}████████████████████${NC}"
+else
+    H_S="${B}Healthy${NC}"
+    H_B="${B}████████████████████${NC}"
+fi
+
+# ADGUARD LOGIC
+AG_DATA=$(curl -s --max-time 1 -u "${AG_USER}:${AG_PASS}" "http://${AG_IP}:8080/control/stats")
 TOTAL_Q=$(echo "$AG_DATA" | grep -o '"num_dns_queries":[0-9]*' | cut -d: -f2)
 BLOCKED=$(echo "$AG_DATA" | grep -o '"num_blocked_filtering":[0-9]*' | cut -d: -f2)
-
-if [[ -z "$BLOCKED" ]]; then
-    AG_DISPLAY="${R}Offline${NC}"
-else
-    PERC=0
-    if [[ "$TOTAL_Q" -gt 0 ]]; then
-        PERC=$(( 100 * BLOCKED / TOTAL_Q ))
-    fi
-    AG_DISPLAY="${R}${BLOCKED}${NC} blocks (${G}${PERC}%${NC})"
+if [[ -z "$BLOCKED" ]]; then AG_D="${R}Offline${NC}"; AG_SQ="${R}█${NC}"; else
+    AG_PERC=0; [[ "$TOTAL_Q" -gt 0 ]] && AG_PERC=$(( 100 * BLOCKED / TOTAL_Q ))
+    AG_D="${BLOCKED} blocks (${B}${AG_PERC}%${NC})"; AG_SQ="${B}█${NC}"
 fi
+
+# SERVICE CHECKS
+C_SQ=$([[ $(curl -s --max-time 1 -o /dev/null -w "%{http_code}" http://localhost:2019/metrics) == "200" ]] && echo -e "${B}█${NC}" || echo -e "${R}█${NC}")
+H_SQ=$([[ $(curl -s --max-time 1 -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/) =~ (200|302) ]] && echo -e "${B}█${NC}" || echo -e "${R}█${NC}")
 
 # DISPLAY
 fastfetch
 echo "----------------------------------------------------------------------------------"
-echo -ne " RAM:   ["; draw_bar $RAM_PERC; echo -e "] $RAM_PERC% (${RAM_USED}MB / ${RAM_TOTAL}MB)"
-echo -ne " CPU:   ["; draw_bar $CPU_VAL; echo -e "] $CPU_VAL%"
-echo -ne " DISK:  ["; draw_bar $DISK_PERC; echo -e "] $DISK_PERC%"
-echo -ne " LIFE:  ["; draw_bar $UP_PERC "true"; echo -e "] $DAYS_SINCE / 365 Days"
+echo -e " RAM:     [${R_BAR}] $RAM_P% (${RAM_U}MB / ${RAM_T}MB)"
+echo -e " CPU:     [${C_BAR}] $CPU_V%"
+echo -e " DISK:    [${D_BAR}] $DISK_P%"
+echo -e " LIFE:    [${L_BAR}] $DAYS / 365 Days"
+echo -e " HEALTH:  [${H_B}] $H_S"
+echo -e " QUOTA:   [${BW_BAR}] ${BW_DATA} / ${DAILY_QUOTA} GB (Today)"
 echo "----------------------------------------------------------------------------------"
 echo -e " \033[1;31mSECURITY CARNAGE\033[0m"
 echo "----------------------------------------------------------------------------------"
-echo -e " BANS:    ${R}${TOTAL_DEFLECTED}${NC} Attacks | Recidive: ${Y}${RECIDIVE_COUNT}${NC}"
+echo -e " BANS:    ${R}${TOTAL_DEF}${NC} Attacks | Recidive: ${Y}${RECIDIVE}${NC}"
 echo -e " THREATS: ${R}${FAILED_SSH}${NC} Failed SSH attempts (24h)"
-echo -e " TRAFFIC: ↓ ${G}${RX_BPS}${NC} KB/s | ↑ ${G}${TX_BPS}${NC} KB/s"
-echo -e " NETWORK: Tailscale: ${G}${TS_IP}${NC}"
-echo -e " ACTIVE:  ${Y}${ACTIVE_PEERS}${NC}"
-echo -e " ADGUARD: ${AG_DISPLAY}"
-CADDY_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:2019/metrics)
-if [ "$CADDY_CHECK" == "200" ]; then C_STATUS="${G}Online${NC}"; else C_STATUS="${R}Offline${NC}"; fi
-echo -e " CADDY:    ${C_STATUS}"
-HD_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/)
-if [ "$HD_CHECK" == "200" ]; then HD_STATUS="${G}Online${NC}"; else HD_STATUS="${R}Offline${NC}"; fi
-echo -e " HEDGEDOC: ${HD_STATUS}"
+echo -e " TRAFFIC: ↓ ${B}${RX}${NC} KB/s | ↑ ${B}${TX}${NC} KB/s"
+echo -e " NETWORK: Tailscale: ${B}${TS_IP}${NC}"
+echo -e " ADGUARD:  ${AG_SQ} ${AG_D}"
+echo -e " CADDY:    ${C_SQ} Online status"
+echo -e " HEDGEDOC: ${H_SQ} Online status"
 echo "----------------------------------------------------------------------------------"
