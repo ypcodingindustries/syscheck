@@ -1,0 +1,55 @@
+import subprocess, time, json, urllib.request, base64, os
+
+# --- CONFIG ---
+INTERFACE = "ens3"
+AG_IP = "100.96.42.118"
+BIRTHDAY = "2026-02-04"
+
+# Pull from your .bashrc exports
+AG_USER = os.environ.get('AG_USER', 'admin')
+AG_PASS = os.environ.get('AG_PASS', 'password')
+
+def get_output(cmd):
+    try: return subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode().strip()
+    except: return "0"
+
+def get_traffic(iface):
+    try:
+        with open(f"/sys/class/net/{iface}/statistics/rx_bytes", "r") as f: rx1 = int(f.read())
+        with open(f"/sys/class/net/{iface}/statistics/tx_bytes", "r") as f: tx1 = int(f.read())
+        time.sleep(1)
+        with open(f"/sys/class/net/{iface}/statistics/rx_bytes", "r") as f: rx2 = int(f.read())
+        with open(f"/sys/class/net/{iface}/statistics/tx_bytes", "r") as f: tx2 = int(f.read())
+        return int((rx2 - rx1) / 1024), int((tx2 - tx1) / 1024)
+    except: return 0, 0
+
+def get_adguard(ip, user, pw):
+    try:
+        req = urllib.request.Request(f"http://{ip}:8080/control/stats")
+        auth = base64.b64encode(f"{user}:{pw}".encode()).decode()
+        req.add_header("Authorization", f"Basic {auth}")
+        with urllib.request.urlopen(req, timeout=1) as res:
+            d = json.loads(res.read().decode())
+            b = d.get('num_blocked_filtering', 0)
+            t = d.get('num_dns_queries', 1)
+            p = int((b/t)*100) if t>0 else 0
+            return b, p, "200"
+    except: return 0, 0, "500"
+
+# GATHER
+mem_t = get_output("free -m | awk '/Mem:/ {print $2}'")
+mem_u = get_output("free -m | awk '/Mem:/ {print $3}'")
+cpu = get_output("top -bn1 | grep 'Cpu(s)' | awk '{print 100 - $8}'").split('.')[0]
+disk = get_output("df / | awk 'NR==2 {print $5}'").replace('%', '')
+days = get_output(f"echo $(( ($(date +%s) - $(date -d '{BIRTHDAY}' +%s)) / 86400 ))")
+reboot = "1" if os.path.exists("/var/run/reboot-required") else "0"
+rx, tx = get_traffic(INTERFACE)
+bans = get_output("grep -c 'Ban ' /var/log/fail2ban.log 2>/dev/null")
+reci = get_output("grep 'recidive' /var/log/fail2ban.log 2>/dev/null | grep -c 'Ban '")
+ssh = get_output("journalctl _COMM=sshd --since '24 hours ago' 2>/dev/null | grep -c 'Failed password'")
+ts_ip = get_output("tailscale ip -4 2>/dev/null") or "127.0.0.1"
+ag_b, ag_p, ag_c = get_adguard(AG_IP, AG_USER, AG_PASS)
+caddy = get_output("curl -s -o /dev/null -w '%{http_code}' http://localhost:2019/metrics")
+hedge = get_output("curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/")
+
+print(f"{mem_u}|{mem_t}|{cpu}|{disk}|{days}|{reboot}|{rx}|{tx}|{bans}|{reci}|{ssh}|{ts_ip}|{ag_b}|{ag_p}|{ag_c}|{caddy}|{hedge}")

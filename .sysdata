@@ -1,0 +1,45 @@
+#!/bin/bash
+BIRTHDAY="2026-02-04"
+AG_IP="100.96.42.118"
+DAILY_QUOTA=25
+INTERFACE="ens3"
+
+# STATS
+export RAM_T=$(free -m | awk '/Mem:/ { print $2 }')
+export RAM_U=$(free -m | awk '/Mem:/ { print $3 }')
+export RAM_P=$(( RAM_U * 100 / RAM_T ))
+export CPU_V=$(top -bn1 | grep "Cpu(s)" | awk '{print 100 - $8}' | cut -d. -f1)
+export DISK_P=$(df / | awk 'NR==2 {print $5}' | sed 's/%//')
+export DAYS=$(( ($(date +%s) - $(date -d "$BIRTHDAY" +%s)) / 86400 ))
+export LIFE_P=$(( DAYS * 100 / 365 ))
+
+# BANDWIDTH & QUOTA
+BW_DATA=$(vnstat -i $INTERFACE -d --oneline | cut -d';' -f4)
+export BW_VAL=$(echo $BW_DATA | awk '{print $1}')
+export BW_UNIT=$(echo $BW_DATA | awk '{print $2}')
+export BW_DISP="${BW_VAL} ${BW_UNIT}"
+export BW_PERC=$(echo "$BW_VAL $DAILY_QUOTA" | awk '{printf "%d", ($1*100)/$2}')
+
+# TRAFFIC (1-second sample)
+R1=$(cat /sys/class/net/$INTERFACE/statistics/rx_bytes)
+T1=$(cat /sys/class/net/$INTERFACE/statistics/tx_bytes)
+sleep 1
+R2=$(cat /sys/class/net/$INTERFACE/statistics/rx_bytes)
+T2=$(cat /sys/class/net/$INTERFACE/statistics/tx_bytes)
+export RX=$(( (R2 - R1) / 1024 ))
+export TX=$(( (T2 - T1) / 1024 ))
+
+# SECURITY
+LOG="/var/log/fail2ban.log"
+export TOTAL_DEF=$(grep -c "Ban " $LOG 2>/dev/null || echo "0")
+export RECIDIVE=$(grep "recidive" $LOG 2>/dev/null | grep -c "Ban " || echo "0")
+export FAILED_SSH=$(journalctl _COMM=sshd --since "24 hours ago" 2>/dev/null | grep -c "Failed password" || echo "0")
+export TS_IP=$(tailscale ip -4 2>/dev/null || echo "127.0.0.1")
+
+# SERVICE CHECKS
+export AG_DATA=$(curl -s --max-time 1 "http://${AG_IP}:8080/control/stats")
+export BLOCKED=$(echo "$AG_DATA" | grep -o '"num_blocked_filtering":[0-9]*' | cut -d: -f2 || echo "0")
+export TOTAL_Q=$(echo "$AG_DATA" | grep -o '"num_dns_queries":[0-9]*' | cut -d: -f2 || echo "1")
+export AG_P=$(( 100 * BLOCKED / TOTAL_Q ))
+export C_CODE=$(curl -s --max-time 1 -o /dev/null -w "%{http_code}" http://localhost:2019/metrics)
+export H_CODE=$(curl -s --max-time 1 -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/)

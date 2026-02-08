@@ -1,42 +1,35 @@
-
 # Syscheck Dashboard 🚀
-
 ![Dashboard Preview](preview.png)
 
 A lightweight, high-visibility system dashboard for Fedora Cloud, optimized for mobile SSH. Designed for the "Imperator" node.
 
+## 🏗 Architecture: The "Split Engine" Model
+The project uses a hybrid architecture to ensure stability on narrow mobile screens:
+* **Python Engine (`syscheck-engine`)**: Handles the heavy lifting—API calls (AdGuard), delta-math (Traffic), and system parsing. It outputs a single pipe-delimited string to prevent "ghost characters" and line-wrapping bugs.
+* **Bash Display (`syscheck`)**: Handles the aesthetic—renders the UI, progress bars, and high-visibility colors.
+
 ## 🛠 Features
 - **Fastfetch Integration**: Clean system info and OS branding.
-- **Resource Bars**: Visual RAM, CPU, and Disk usage progress bars.
-- **Node Life & Quota**: Tracking server age and daily bandwidth limits.
+- **Resource Bars**: Visual RAM, CPU, and Disk usage (optimized for 15-char mobile width).
+- **Node Life & Health**: Tracking server age and **dnf5 reboot requirements**.
 - **Security Carnage**: Live tracking of Fail2Ban hits, Recidive bans, and SSH threats.
 - **Service Heartbeat**: 
-    - **Caddy**: Web server status via Admin API.
-    - **HedgeDoc**: Documentation server health tracking.
-    - **AdGuard Home**: Live DNS block counts and filtering efficiency percentage.
-- **Network Stats**:
-    - **Tailscale**: Internal Mesh IP tracking.
-    - **Traffic**: Real-time Up/Down bandwidth monitoring.
+    - **Caddy & HedgeDoc**: Status tracking via API/HTTP codes.
+    - **AdGuard Home**: Live DNS block counts and filtering efficiency via Basic Auth.
+- **Network Stats**: Tailscale IP tracking and real-time Up/Down traffic sampling.
+
+## 📦 Dependencies
+Ensure these are installed on your Fedora system:
+- `python3` (for the data engine)
+- `fastfetch` (for the header)
+- `vnstat` (for bandwidth/quota tracking)
+- `procps-ng` (for `top` and `free` commands)
 
 ## 🚀 Installation
-1. Clone this repo to `~/syscheck-project`.
-2. Link the script: `sudo ln -s $(pwd)/syscheck /usr/local/bin/syscheck`.
-3. Set your AdGuard credentials in the script header.
-4. Ensure `vnstat` and `bc` are installed for bandwidth tracking.
-
-## ⚡ Optional Power-Ups
-Add these to your \`~/.bashrc\` to unlock live monitoring and easy backups:
-
-### 1. Live Dashboard Mode
-Watch your system stats update in real-time (1s refresh):
-\`\`\`bash
-alias longwatch='watch -n 1 -c ~/syscheck-project/syscheck'
-\`\`\`
-
-### 2. Quick Cloud Save
-Backup your script tweaks to Git from any directory:
-\`\`\`bash
-alias gitsave='cd ~/syscheck-project && git add . && git commit -m "Update" && git push origin main && cd -'
-\`\`\`
-
+1. Clone this repo: `git clone https://github.com/your-repo/syscheck-project.git ~/syscheck-project`
+2. Create an alias: `echo "alias syscheck='~/syscheck-project/syscheck'" >> ~/.bashrc`
+3. Ensure AdGuard credentials are exported in your `~/.bashrc`:
+   ```bash
+   export AG_USER="your_user"
+   export AG_PASS="your_password"
 
