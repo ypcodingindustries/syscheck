@@ -1,11 +1,13 @@
 #!/bin/bash
-IFS="|" read -r RAM_U RAM_T CPU DISK DAYS REBOOT RX TX BANS RECI SSH TS_IP AG_B AG_P AG_C C_C H_C < <(python3 ~/syscheck-project/syscheck-engine)
+IFS="|" read -r RAM_U RAM_T CPU DISK DAYS REBOOT RX TX BANS RECI SSH TS_IP AG_B AG_P AG_C C_C H_C Q_STR Q_P < <(python3 ~/syscheck-project/syscheck-engine)
 
 B='\033[1;34m'; Y='\033[1;33m'; R='\033[0;31m'; NC='\033[0m'
 RAM_P=$(( RAM_U * 100 / RAM_T ))
 
 get_bar() {
-    local fill=$(( $1 / 7 )); [[ $fill -gt 15 ]] && fill=15
+    local perc=$1
+    local fill=$(( perc / 7 ))
+    [[ $fill -gt 15 ]] && fill=15
     local bar=""
     for ((i=0; i<fill; i++)); do bar+="█"; done
     for ((i=0; i<$((15-fill)); i++)); do bar+=" "; done
@@ -23,6 +25,7 @@ if [ "$REBOOT" == "1" ]; then
 else
     echo -e " HEALTH:  [${B}███████████████${NC}] Healthy"
 fi
+echo -e " QUOTA:   [$(get_bar $Q_P)] $Q_STR / 25 GB"
 echo "----------------------------------------------------------------"
 echo -e " ${R}SECURITY CARNAGE${NC}"
 echo "----------------------------------------------------------------"
@@ -31,7 +34,6 @@ echo -e " THREATS: ${R}${SSH}${NC} Failed SSH (24h)"
 echo -e " TRAFFIC: ↓ ${B}${RX}${NC} KB/s | ↑ ${B}${TX}${NC} KB/s"
 echo -e " NETWORK: Tailscale: ${B}${TS_IP}${NC}"
 
-# Service status logic: Red square if status is not 200 (needs attention)
 [ "$AG_C" == "200" ] && AS="${B}█${NC}" || AS="${R}█${NC}"
 [ "$C_C" == "200" ] && CS="${B}█${NC}" || CS="${R}█${NC}"
 [[ "$H_C" =~ (200|302) ]] && HS="${B}█${NC}" || HS="${R}█${NC}"

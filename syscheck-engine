@@ -4,8 +4,8 @@ import subprocess, time, json, urllib.request, base64, os
 INTERFACE = "ens3"
 AG_IP = "100.96.42.118"
 BIRTHDAY = "2026-02-04"
+DAILY_QUOTA = 25  # GB
 
-# Pull from your .bashrc exports
 AG_USER = os.environ.get('AG_USER', 'admin')
 AG_PASS = os.environ.get('AG_PASS', 'password')
 
@@ -23,6 +23,17 @@ def get_traffic(iface):
         return int((rx2 - rx1) / 1024), int((tx2 - tx1) / 1024)
     except: return 0, 0
 
+def get_quota(iface):
+    try:
+        stats = get_output(f"vnstat -i {iface} --oneline").split(';')
+        today_usage_str = stats[4]
+        val = float(today_usage_str.split()[0])
+        unit = today_usage_str.split()[1]
+        gb_val = val / 1024 if "MiB" in unit else val
+        perc = int((gb_val / DAILY_QUOTA) * 100)
+        return today_usage_str, perc
+    except: return "0 GB", 0
+
 def get_adguard(ip, user, pw):
     try:
         req = urllib.request.Request(f"http://{ip}:8080/control/stats")
@@ -36,7 +47,6 @@ def get_adguard(ip, user, pw):
             return b, p, "200"
     except: return 0, 0, "500"
 
-# GATHER
 mem_t = get_output("free -m | awk '/Mem:/ {print $2}'")
 mem_u = get_output("free -m | awk '/Mem:/ {print $3}'")
 cpu = get_output("top -bn1 | grep 'Cpu(s)' | awk '{print 100 - $8}'").split('.')[0]
@@ -44,6 +54,7 @@ disk = get_output("df / | awk 'NR==2 {print $5}'").replace('%', '')
 days = get_output(f"echo $(( ($(date +%s) - $(date -d '{BIRTHDAY}' +%s)) / 86400 ))")
 reboot = "1" if os.path.exists("/var/run/reboot-required") else "0"
 rx, tx = get_traffic(INTERFACE)
+q_str, q_perc = get_quota(INTERFACE)
 bans = get_output("grep -c 'Ban ' /var/log/fail2ban.log 2>/dev/null")
 reci = get_output("grep 'recidive' /var/log/fail2ban.log 2>/dev/null | grep -c 'Ban '")
 ssh = get_output("journalctl _COMM=sshd --since '24 hours ago' 2>/dev/null | grep -c 'Failed password'")
@@ -52,4 +63,4 @@ ag_b, ag_p, ag_c = get_adguard(AG_IP, AG_USER, AG_PASS)
 caddy = get_output("curl -s -o /dev/null -w '%{http_code}' http://localhost:2019/metrics")
 hedge = get_output("curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/")
 
-print(f"{mem_u}|{mem_t}|{cpu}|{disk}|{days}|{reboot}|{rx}|{tx}|{bans}|{reci}|{ssh}|{ts_ip}|{ag_b}|{ag_p}|{ag_c}|{caddy}|{hedge}")
+print(f"{mem_u}|{mem_t}|{cpu}|{disk}|{days}|{reboot}|{rx}|{tx}|{bans}|{reci}|{ssh}|{ts_ip}|{ag_b}|{ag_p}|{ag_c}|{caddy}|{hedge}|{q_str}|{q_perc}")
