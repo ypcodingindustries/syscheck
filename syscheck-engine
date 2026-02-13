@@ -1,66 +1,82 @@
-import subprocess, time, json, urllib.request, base64, os
-
-# --- CONFIG ---
-INTERFACE = "ens3"
-AG_IP = "100.96.42.118"
-BIRTHDAY = "2026-02-04"
-DAILY_QUOTA = 25  # GB
-
-AG_USER = os.environ.get('AG_USER', 'admin')
-AG_PASS = os.environ.get('AG_PASS', 'password')
+import subprocess, time, os, re, glob
 
 def get_output(cmd):
-    try: return subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode().strip()
-    except: return "0"
-
-def get_traffic(iface):
     try:
-        with open(f"/sys/class/net/{iface}/statistics/rx_bytes", "r") as f: rx1 = int(f.read())
-        with open(f"/sys/class/net/{iface}/statistics/tx_bytes", "r") as f: tx1 = int(f.read())
-        time.sleep(1)
-        with open(f"/sys/class/net/{iface}/statistics/rx_bytes", "r") as f: rx2 = int(f.read())
-        with open(f"/sys/class/net/{iface}/statistics/tx_bytes", "r") as f: tx2 = int(f.read())
-        return int((rx2 - rx1) / 1024), int((tx2 - tx1) / 1024)
-    except: return 0, 0
+        return subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL, text=True).strip()
+    except:
+        return "0"
 
-def get_quota(iface):
+def get_ext_ip(version="-4"):
+    providers = ["https://icanhazip.com", "https://ifconfig.me"]
+    for url in providers:
+        res = get_output(f"curl {version} -s --connect-timeout 2 {url}")
+        if res and "upstream" not in res and ("." in res or ":" in res):
+            return res
+    return "None"
+
+def get_net_bytes(interface="ens3"):
     try:
-        stats = get_output(f"vnstat -i {iface} --oneline").split(';')
-        today_usage_str = stats[4]
-        val = float(today_usage_str.split()[0])
-        unit = today_usage_str.split()[1]
-        gb_val = val / 1024 if "MiB" in unit else val
-        perc = int((gb_val / DAILY_QUOTA) * 100)
-        return today_usage_str, perc
-    except: return "0 GB", 0
+        with open("/proc/net/dev", "r") as f:
+            for line in f:
+                if interface in line:
+                    data = line.split()
+                    return int(data[1]), int(data[9])
+    except:
+        pass
+    return 0, 0
 
-def get_adguard(ip, user, pw):
+r1, t1 = get_net_bytes("ens3")
+time.sleep(1)
+r2, t2 = get_net_bytes("ens3")
+rx_s = (r2 - r1) / 1024
+tx_s = (t2 - t1) / 1024
+rx = f"{rx_s:.1f}K" if rx_s < 1024 else f"{rx_s/1024:.1f}M"
+tx = f"{tx_s:.1f}K" if tx_s < 1024 else f"{tx_s/1024:.1f}M"
+
+uptime = get_output("uptime -p").replace("up ", "")
+m_t = int(get_output("free -m | awk '/Mem:/ {print $2}'") or 1)
+m_u = int(get_output("free -m | awk '/Mem:/ {print $3}'") or 0)
+dp = int(get_output("df / | awk 'NR==2 {print $5}'").replace('%', '') or 0)
+ru, rt = get_output("df -h / | awk 'NR==2 {print $3}'"), get_output("df -h / | awk 'NR==2 {print $2}'")
+
+ls_raw = get_output("sudo du -sm /var/log 2>/dev/null | awk '{print $1}'") or "0"
+ls_p = min(int((int(ls_raw) / 2048) * 100), 100)
+ls_str = get_output("sudo du -sh /var/log 2>/dev/null | awk '{print $1}'") or "0B"
+
+ext_v4 = get_ext_ip("-4")
+ext_v6 = get_output("ip -6 addr show ens3 | grep 'scope global' | grep -v 'temporary' | awk '{print $2}' | cut -d/ -f1 | head -n1") or "None"
+ts_ip = get_output("tailscale ip -4") or "127.0.0.1"
+# Detects if VPS is advertising itself as an exit node (vpn-flip status)
+vpn = "ACTIVE" if '0.0.0.0/0' in get_output("tailscale status --json") else "INACTIVE"
+ts_p = get_output("tailscale status | grep -c 'active'") or "0"
+
+# Quota Logic for vnStat 2.13 (Monthly @ 750GB)
+q_raw = get_output("vnstat -i ens3 -m --oneline").split(';')
+if len(q_raw) > 10:
+    q_s = q_raw[10]
     try:
-        req = urllib.request.Request(f"http://{ip}:8080/control/stats")
-        auth = base64.b64encode(f"{user}:{pw}".encode()).decode()
-        req.add_header("Authorization", f"Basic {auth}")
-        with urllib.request.urlopen(req, timeout=1) as res:
-            d = json.loads(res.read().decode())
-            b = d.get('num_blocked_filtering', 0)
-            t = d.get('num_dns_queries', 1)
-            p = int((b/t)*100) if t>0 else 0
-            return b, p, "200"
-    except: return 0, 0, "500"
+        parts = q_s.split()
+        val = float(parts[0])
+        if "MiB" in parts[1]: val = val / 1024
+        q_p = int((val / 750) * 100)
+    except:
+        q_p = 0
+else:
+    q_s, q_p = "0 GiB", 0
 
-mem_t = get_output("free -m | awk '/Mem:/ {print $2}'")
-mem_u = get_output("free -m | awk '/Mem:/ {print $3}'")
-cpu = get_output("top -bn1 | grep 'Cpu(s)' | awk '{print 100 - $8}'").split('.')[0]
-disk = get_output("df / | awk 'NR==2 {print $5}'").replace('%', '')
-days = get_output(f"echo $(( ($(date +%s) - $(date -d '{BIRTHDAY}' +%s)) / 86400 ))")
-reboot = "1" if os.path.exists("/var/run/reboot-required") else "0"
-rx, tx = get_traffic(INTERFACE)
-q_str, q_perc = get_quota(INTERFACE)
-bans = get_output("grep -c 'Ban ' /var/log/fail2ban.log 2>/dev/null")
-reci = get_output("grep 'recidive' /var/log/fail2ban.log 2>/dev/null | grep -c 'Ban '")
-ssh = get_output("journalctl _COMM=sshd --since '24 hours ago' 2>/dev/null | grep -c 'Failed password'")
-ts_ip = get_output("tailscale ip -4 2>/dev/null") or "127.0.0.1"
-ag_b, ag_p, ag_c = get_adguard(AG_IP, AG_USER, AG_PASS)
-caddy = get_output("curl -s -o /dev/null -w '%{http_code}' http://localhost:2019/metrics")
-hedge = get_output("curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/")
+sec_raw = get_output("systemd-analyze security vps-security-scan.service --no-pager")
+hv_match = re.search(r"Exposure level.*?:?\s+([0-9.]+)", sec_raw, re.IGNORECASE)
+hv = hv_match.group(1) if hv_match else "N/A"
+ll = get_output("sudo ls -t /var/log/vps-security/scan-*.log 2>/dev/null | head -1 | xargs -n1 basename 2>/dev/null | sed 's/scan-//;s/.log//'") or "N/A"
 
-print(f"{mem_u}|{mem_t}|{cpu}|{disk}|{days}|{reboot}|{rx}|{tx}|{bans}|{reci}|{ssh}|{ts_ip}|{ag_b}|{ag_p}|{ag_c}|{caddy}|{hedge}|{q_str}|{q_perc}")
+ag = get_output(f"curl -s -o /dev/null -w '%{{http_code}}' http://{ts_ip}:8080 || echo 500")
+cd = get_output("curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:2019/metrics || echo 500")
+hd = get_output("curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/ || echo 500")
+sd = get_output("systemctl is-active send.service")
+jits = "active" if "jitsi" in get_output("podman ps --format '{{.Names}}'").lower() else "inactive"
+
+sshj = get_output("sudo fail2ban-client status sshd | grep 'Currently banned' | awk '{print $NF}'") or "0"
+recj = get_output("sudo fail2ban-client status recidive | grep 'Currently banned' | awk '{print $NF}'") or "0"
+jitj = get_output("sudo fail2ban-client status jitsi-auth | grep 'Currently banned' | awk '{print $NF}'") or "0"
+
+print(f"{m_u}|{m_t}|{dp}|{q_s}|{q_p}|{uptime}|{ext_v4}|{ext_v6}|{ts_ip}|{ts_p}|{vpn}|{rx}|{tx}|{ru}|{rt}|{ls_str}|{ls_p}|{hv}|{ll}|{ag}|{cd}|{hd}|{sd}|{sshj}|{recj}|{jits}|{jitj}")

@@ -1,44 +1,50 @@
 #!/bin/bash
-IFS="|" read -r RAM_U RAM_T CPU DISK DAYS REBOOT RX TX BANS RECI SSH TS_IP AG_B AG_P AG_C C_C H_C Q_STR Q_P < <(python3 ~/syscheck-project/syscheck-engine)
+DATA=$(python3 ~/syscheck-project/syscheck-engine)
+if [ -z "$DATA" ]; then echo "Engine Error"; exit 1; fi
 
-B='\033[1;34m'; Y='\033[1;33m'; R='\033[0;31m'; NC='\033[0m'
-RAM_P=$(( RAM_U * 100 / RAM_T ))
+IFS="|" read -r MU MT DP QS QP UPT V4 V6 TIP TP VPN RX TX RU RT LS LSP HV LL AG CD HD SD SSHJ RECJ JITS JITJ <<< "$DATA"
+
+B='\033[1;34m'; Y='\033[1;33m'; R='\033[0;31m'; G='\033[0;32m'; NC='\033[0m'
 
 get_bar() {
-    local perc=$1
-    local fill=$(( perc / 7 ))
-    [[ $fill -gt 15 ]] && fill=15
+    local val=${1%.*}
+    local fill=$(( val * 15 / 100 ))
+    if [ "$val" -gt 0 ] && [ "$fill" -eq 0 ]; then fill=1; fi
     local bar=""
-    for ((i=0; i<fill; i++)); do bar+="█"; done
-    for ((i=0; i<$((15-fill)); i++)); do bar+=" "; done
+    for ((i=0; i<15; i++)); do [ $i -lt $fill ] && bar+="█" || bar+=" "; done
     echo -e "${B}${bar}${NC}"
+}
+
+status_color() {
+    if [[ "$1" =~ ^[23] ]] || [[ "$1" == "active" ]]; then echo -e "${G}Online${NC}"; else echo -e "${R}Offline${NC}"; fi
 }
 
 fastfetch
 echo "----------------------------------------------------------------"
-echo -e " RAM:     [$(get_bar $RAM_P)] $RAM_P% ($RAM_U / $RAM_T MB)"
-echo -e " CPU:     [$(get_bar $CPU)] $CPU%"
-echo -e " DISK:    [$(get_bar $DISK)] $DISK%"
-echo -e " LIFE:    [$(get_bar $(( DAYS > 0 ? (DAYS * 100 / 365 > 0 ? DAYS * 100 / 365 : 1) : 0 )))] $DAYS / 365 Days"
-if [ "$REBOOT" == "1" ]; then
-    echo -e " HEALTH:  [${R}███████████████${NC}] ${R}REBOOT NEEDED${NC}"
-else
-    echo -e " HEALTH:  [${B}███████████████${NC}] Healthy"
-fi
-echo -e " QUOTA:   [$(get_bar $Q_P)] $Q_STR / 25 GB"
+echo -e " UPTIME:    ${G}${UPT}${NC}"
+echo -e " RAM:       [$(get_bar $((MU*100/MT)))] $((MU*100/MT))% ($MU/$MT MB)"
+echo -e " DISK:      [$(get_bar $DP)] $DP% ($RU / $RT)"
+echo -e " LOGS:      [$(get_bar $LSP)] $LSP% ($LS / 2 GB)"
+echo -e " QUOTA:     [$(get_bar $QP)] $QP% ($QS / 750 GB)"
 echo "----------------------------------------------------------------"
-echo -e " ${R}SECURITY CARNAGE${NC}"
+echo -e " ${R}NETWORK CARNAGE${NC}"
 echo "----------------------------------------------------------------"
-echo -e " BANS:    ${R}${BANS}${NC} Attacks | Reci: ${Y}${RECI}${NC}"
-echo -e " THREATS: ${R}${SSH}${NC} Failed SSH (24h)"
-echo -e " TRAFFIC: ↓ ${B}${RX}${NC} KB/s | ↑ ${B}${TX}${NC} KB/s"
-echo -e " NETWORK: Tailscale: ${B}${TS_IP}${NC}"
-
-[ "$AG_C" == "200" ] && AS="${B}█${NC}" || AS="${R}█${NC}"
-[ "$C_C" == "200" ] && CS="${B}█${NC}" || CS="${R}█${NC}"
-[[ "$H_C" =~ (200|302) ]] && HS="${B}█${NC}" || HS="${R}█${NC}"
-
-echo -e " ADGUARD:  $AS ${AG_B} blocks (${B}${AG_P}%${NC})"
-echo -e " CADDY:    $CS Online status"
-echo -e " HEDGEDOC: $HS Online status"
+echo -e " IP V4:     ${B}${V4}${NC}"
+echo -e " IP V6:     ${B}${V6}${NC}"
+echo -e " TS IP:     ${B}${TIP}${NC}"
+echo -e " PEERS:     ${B}${TP} active${NC}"
+[[ "$VPN" == "ACTIVE" ]] && VS="${G}${VPN}${NC}" || VS="${R}${VPN}${NC}"
+echo -e " VPN:       $VS"
+echo -e " SPEED:     ${Y}RX: ${RX}${NC} | ${G}TX: ${TX}${NC}"
+echo "----------------------------------------------------------------"
+echo -e " ${R}SECURITY & SERVICES${NC}"
+echo "----------------------------------------------------------------"
+echo -e " HARDEN:    ${Y}${HV}${NC} exposure | LAST: ${B}${LL}${NC}"
+echo -e " JAILS:     ${G}${SSHJ}${NC} SSH | ${G}${RECJ}${NC} Recid | ${G}${JITJ}${NC} Jitsi"
+echo "----------------------------------------------------------------"
+echo -e " ADGUARD:   $(status_color $AG)"
+echo -e " CADDY:     $(status_color $CD)"
+echo -e " HEDGEDOC:  $(status_color $HD)"
+echo -e " SEND:      $(status_color $SD)"
+echo -e " JITSI:     $(status_color $JITS)"
 echo "----------------------------------------------------------------"
