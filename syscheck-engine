@@ -1,4 +1,4 @@
-import subprocess, time, os, re, glob
+import subprocess, time, os, re, json
 
 def get_output(cmd):
     try:
@@ -46,11 +46,9 @@ ls_str = get_output("sudo du -sh /var/log 2>/dev/null | awk '{print $1}'") or "0
 ext_v4 = get_ext_ip("-4")
 ext_v6 = get_output("ip -6 addr show ens3 | grep 'scope global' | grep -v 'temporary' | awk '{print $2}' | cut -d/ -f1 | head -n1") or "None"
 ts_ip = get_output("tailscale ip -4") or "127.0.0.1"
-# Detects if VPS is advertising itself as an exit node (vpn-flip status)
 vpn = "ACTIVE" if '0.0.0.0/0' in get_output("tailscale status --json") else "INACTIVE"
 ts_p = get_output("tailscale status | grep -c 'active'") or "0"
 
-# Quota Logic for vnStat 2.13 (Monthly @ 750GB)
 q_raw = get_output("vnstat -i ens3 -m --oneline").split(';')
 if len(q_raw) > 10:
     q_s = q_raw[10]
@@ -73,10 +71,19 @@ ag = get_output(f"curl -s -o /dev/null -w '%{{http_code}}' http://{ts_ip}:8080 |
 cd = get_output("curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:2019/metrics || echo 500")
 hd = get_output("curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/ || echo 500")
 sd = get_output("systemctl is-active send.service")
-jits = "active" if "jitsi" in get_output("podman ps --format '{{.Names}}'").lower() else "inactive"
+
+# Jitsi Live Stats
+j_stats_raw = get_output("podman exec docker-jitsi-meet_jvb_1 curl -s http://localhost:8080/colibri/stats")
+try:
+    j_data = json.loads(j_stats_raw)
+    j_conf = j_data.get("conferences", 0)
+    j_part = j_data.get("participants", 0)
+    jits_status = f"{j_part} Users ({j_conf} Conf)" if j_part > 0 else "active"
+except:
+    jits_status = "active" if "jvb" in get_output("podman ps --format '{{.Names}}'") else "inactive"
 
 sshj = get_output("sudo fail2ban-client status sshd | grep 'Currently banned' | awk '{print $NF}'") or "0"
 recj = get_output("sudo fail2ban-client status recidive | grep 'Currently banned' | awk '{print $NF}'") or "0"
 jitj = get_output("sudo fail2ban-client status jitsi-auth | grep 'Currently banned' | awk '{print $NF}'") or "0"
 
-print(f"{m_u}|{m_t}|{dp}|{q_s}|{q_p}|{uptime}|{ext_v4}|{ext_v6}|{ts_ip}|{ts_p}|{vpn}|{rx}|{tx}|{ru}|{rt}|{ls_str}|{ls_p}|{hv}|{ll}|{ag}|{cd}|{hd}|{sd}|{sshj}|{recj}|{jits}|{jitj}")
+print(f"{m_u}|{m_t}|{dp}|{q_s}|{q_p}|{uptime}|{ext_v4}|{ext_v6}|{ts_ip}|{ts_p}|{vpn}|{rx}|{tx}|{ru}|{rt}|{ls_str}|{ls_p}|{hv}|{ll}|{ag}|{cd}|{hd}|{sd}|{sshj}|{recj}|{jits_status}|{jitj}")

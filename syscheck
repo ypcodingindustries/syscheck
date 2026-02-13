@@ -16,7 +16,11 @@ get_bar() {
 }
 
 status_color() {
-    if [[ "$1" =~ ^[23] ]] || [[ "$1" == "active" ]]; then echo -e "${G}Online${NC}"; else echo -e "${R}Offline${NC}"; fi
+    if [[ "$1" =~ ^[23] ]] || [[ "$1" == "active" ]] || [[ "$1" == *"Users"* ]]; then
+        echo -e "${G}Online${NC}"
+    else
+        echo -e "${R}Offline${NC}"
+    fi
 }
 
 fastfetch
@@ -46,5 +50,9 @@ echo -e " ADGUARD:   $(status_color $AG)"
 echo -e " CADDY:     $(status_color $CD)"
 echo -e " HEDGEDOC:  $(status_color $HD)"
 echo -e " SEND:      $(status_color $SD)"
-echo -e " JITSI:     $(status_color $JITS)"
+if [[ "$JITS" == *"Users"* ]]; then
+    echo -e " JITSI:     ${G}${JITS}${NC}"
+else
+    echo -e " JITSI:     $(status_color $JITS)"
+fi
 echo "----------------------------------------------------------------"
