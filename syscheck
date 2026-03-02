@@ -1,5 +1,6 @@
 #!/bin/bash
-DATA=$(~/syscheck-project/syscheck-engine)
+# Hardcoded absolute path to engine to prevent sudo path issues
+DATA=$(/home/Firegod/syscheck-project/syscheck-engine)
 if [ -z "$DATA" ]; then echo "Engine Error"; exit 1; fi
 IFS="|" read -r MU MT DP QS QDAY QP UPT V4 V6 TIP TP VPN RX TX RU RT LS LSP HV LL AG CD HD SD SSHJ RECJ TERJ TOP_ORG JITS JITJ RKS_VAL <<< "$DATA"
 B='\033[1;34m'; Y='\033[1;33m'; R='\033[0;31m'; G='\033[0;32m'; NC='\033[0m'
@@ -35,7 +36,7 @@ echo -e " IP V6:     ${B}${V6}${NC}"
 echo -e " TS IP:     ${B}${TIP}${NC}"
 echo -e " PEERS:     ${B}${TP} active${NC}"
 [[ "$VPN" == "ACTIVE" ]] && VS="${G}${VPN}${NC}" || VS="${R}${VPN}${NC}"
-echo -e " VPN:       $VS"
+echo -e " VPN:        $VS"
 echo -e " SPEED:     ${Y}RX: ${RX}${NC} | ${G}TX: ${TX}${NC}"
 echo "----------------------------------------------------------------"
 echo -e " ${R}SECURITY & SERVICES${NC}"

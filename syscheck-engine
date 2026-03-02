@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 import subprocess, time, os, re, json
 from datetime import datetime, timedelta
+
+# Identify the REAL user behind the sudo command
+REAL_USER = os.environ.get('SUDO_USER') or os.environ.get('USER') or 'Firegod'
+# Identify the REAL home directory
+REAL_HOME = os.path.expanduser(f"~{REAL_USER}")
+
 def get_output(cmd):
     try:
         return subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL, text=True, timeout=3).strip()
     except: return "0"
+
 def get_ext_ip(v="-4"):
     res = get_output(f"curl {v} -s --connect-timeout 2 https://icanhazip.com")
     return res if ("." in res or ":" in res) else "None"
+
 def get_net_bytes(interface="ens3"):
     try:
         with open("/proc/net/dev", "r") as f:
@@ -16,6 +24,7 @@ def get_net_bytes(interface="ens3"):
                     data = line.split(); return int(data[1]), int(data[9])
     except: pass
     return 0, 0
+
 r1, t1 = get_net_bytes("ens3")
 time.sleep(1)
 r2, t2 = get_net_bytes("ens3")
@@ -31,6 +40,7 @@ ext_v4, ext_v6 = get_ext_ip("-4"), get_output("ip -6 addr show ens3 | grep 'scop
 ts_ip = get_output("tailscale ip -4") or "127.0.0.1"
 vpn = "ACTIVE" if '0.0.0.0/0' in get_output("tailscale status --json") else "INACTIVE"
 ts_p = get_output("tailscale status | grep -c 'active'") or "0"
+
 q_raw = get_output("vnstat -i ens3 -m --oneline").split(';')
 if len(q_raw) > 10:
     try:
@@ -45,31 +55,38 @@ if len(q_raw) > 10:
         q_s, q_day = f"{val:.1f} GiB", f"{rem_gb / days_rem:.1f} GiB/day"
     except: q_s, q_day, q_p = "0 GiB", "0 GiB/day", 0
 else: q_s, q_day, q_p = "0 GiB", "0 GiB/day", 0
+
 sec_raw = get_output("systemd-analyze security vps-security-scan.service --no-pager")
 hv_match = re.search(r"Overall exposure level.*: ([0-9.]+)", sec_raw)
 hv = hv_match.group(1) if hv_match else "N/A"
 ll = get_output("sudo ls -t /var/log/vps-security/scan-*.log 2>/dev/null | head -1 | xargs -n1 basename 2>/dev/null | sed 's/scan-//;s/.log//'") or "N/A"
+
 top_ip = get_output("sudo grep 'Ban ' /var/log/fail2ban.log | awk '{print $NF}' | sort | uniq -c | sort -nr | head -1 | awk '{print $2}'")
 if top_ip and top_ip != "0":
     top_org = get_output(f"mmdblookup --ip {top_ip} --file /usr/share/GeoIP/GeoLite2-ASN.mmdb autonomous_system_organization 2>/dev/null | grep -o '\".*\"' | head -1 | sed 's/\"//g'")
     top_threat = top_org if top_org else top_ip
 else: top_threat = "None"
+
 ag = get_output(f"curl -s -o /dev/null -w '%{{http_code}}' http://{ts_ip}:8080 || echo 500")
 cd = get_output("curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:2019/metrics || echo 500")
 hd = get_output("curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/ || echo 500")
 sd = get_output("systemctl is-active send.service")
-jits_status = "active" if "jvb" in get_output("podman ps --format '{{.Names}}'") else "inactive"
-# Detailed Terraria Stats
-ter_ps = get_output("podman ps -f name=terraria-server --format '{{.Status}}'")
+
+# Use the dynamically detected REAL_USER for Podman
+pod_base = f"sudo -u {REAL_USER} podman"
+jits_status = "active" if "jvb" in get_output(f"{pod_base} ps --format '{{{{.Names}}}}'") else "inactive"
+ter_ps = get_output(f"{pod_base} ps -f name=terraria-server --format '{{{{.Status}}}}'")
 if "Up" in ter_ps:
-    logs = get_output("podman logs --tail 100 terraria-server")
+    logs = get_output(f"{pod_base} logs --tail 100 terraria-server")
     count = max(0, logs.count("has joined.") - logs.count("has left."))
     load = float(os.getloadavg()[0])
     fps = 60 if load < 1.5 else max(30, int(60 - (load * 5)))
     ter_status = f"{count} Users (Med@{fps}fps)"
 else:
     ter_status = "Offline"
+
 sshj = get_output("sudo fail2ban-client status sshd | grep 'Currently banned' | awk '{print $NF}'") or "0"
 recj = get_output("sudo fail2ban-client status recidive | grep 'Currently banned' | awk '{print $NF}'") or "0"
 jitj = get_output("sudo fail2ban-client status jitsi-auth | grep 'Currently banned' | awk '{print $NF}'") or "0"
+
 print(f"{m_u}|{m_t}|{dp}|{q_s}|{q_day}|{q_p}|{uptime}|{ext_v4}|{ext_v6}|{ts_ip}|{ts_p}|{vpn}|{rx}|{tx}|{ru}|{rt}|{ls_str}|{ls_p}|{hv}|{ll}|{ag}|{cd}|{hd}|{sd}|{sshj}|{recj}|{ter_status}|{top_threat}|{jits_status}|{jitj}|Active")

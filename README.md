@@ -3,32 +3,23 @@
 
 A lightweight, high-visibility system dashboard for Fedora 43 Cloud, optimized for mobile SSH. Designed for the "Imperator" node.
 
-## 🏗 Architecture: The "Split Engine" Model
-The project uses a hybrid architecture to ensure stability on narrow mobile screens:
-* **Python Engine (`syscheck-engine`)**: Handles the heavy lifting—vnStat 2.13 (SQLite) parsing, real-time traffic delta-math (ens3), and service heartbeats. It outputs a single pipe-delimited string to prevent "ghost characters" and line-wrapping bugs.
-* **Bash Display (`syscheck`)**: Handles the aesthetics—renders the UI, dynamic progress bars with "round-up" logic, and high-visibility colors.
+## 🏗 Architecture: The "Sudo-Aware" Model
+The project uses a hybrid architecture designed to bridge the gap between root-level security logs and user-level rootless containers:
+* **Python Engine (`syscheck-engine`)**: Detects the `${SUDO_USER}` to query **Rootless Podman** sockets even when executed via sudo. Handles vnStat 2.13 SQLite parsing and real-time traffic deltas.
+* **Bash Display (`syscheck`)**: A location-agnostic wrapper that finds its own directory and renders a 15-character wide UI optimized for Termux/Mobile SSH.
 
 ## 🛠 Features
-- **Fastfetch Integration**: Clean system info and OS branding for Fedora 43.
-- **Dynamic Resource Bars**: Visual RAM, Disk, and Quota usage optimized for 15-char mobile width.
-- **Billing Cycle Tracking**: Tracks a **750 GB monthly budget** resetting on the **13th** of every month.
-- **Security & Jails**: Live tracking of **Fail2Ban** hits across **SSH, Recidive, and Jitsi-Auth** jails. Includes `systemd-analyze` exposure scores.
-- **Terraria Monitoring**: Live player count (Map: Med) and dynamic FPS calculation based on system load.
-- **Service Heartbeat**:
-    - **Jitsi**: Rootless Podman status tracking (Bridge/Host aware).
-    - **Caddy, HedgeDoc, & AdGuard**: Real-time status tracking via HTTP response codes.
-    - **Tailscale**: Detects exit-node status and active peers.
-- **Network Carnage**: Real-time RX/TX traffic sampling on the `ens3` interface.
+- **Fastfetch Integration**: OS branding and system specs.
+- **Dynamic Resource Bars**: RAM, Disk, and Log usage (2GB cap tracking).
+- **Billing Quota**: Tracks a **750 GB monthly budget** (Reset: 13th).
+- **Security Jails**: Live tracking of **Fail2Ban** (SSH, Recidive, Jitsi-Auth).
+- **Terraria Live Stats**: Real-time player count and dynamic FPS based on CPU load.
+- **Service Heartbeats**: HTTP status tracking for Caddy, HedgeDoc, and AdGuard.
 
-## 📦 Dependencies
-- `python3` (Engine)
-- `fastfetch` (Header)
-- `vnstat` (v2.10+ SQLite)
-- `tailscale` (VPN)
-- `fail2ban` (Jails)
-- `podman` (Container stats)
+## 📦 Requirements
+- `python3`, `fastfetch`, `vnstat`, `fail2ban`, `podman`, `tailscale`
 
-## 🚀 Installation
-1. Clone: `git clone https://github.com/ypcodingindustries/syscheck.git ~/syscheck-project`
-2. Alias: `alias syscheck='~/syscheck-project/syscheck'`
-3. Run: `syscheck`
+## 🚀 Execution
+```bash
+# Add this alias to your .bashrc
+alias syscheck='sudo ~/syscheck-project/syscheck'
