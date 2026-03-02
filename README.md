@@ -16,10 +16,13 @@ The project uses a hybrid architecture designed to bridge the gap between root-l
 - **Terraria Live Stats**: Real-time player count and dynamic FPS based on CPU load.
 - **Service Heartbeats**: HTTP status tracking for Caddy, HedgeDoc, and AdGuard.
 
+## 🤖 AI Maintenance & Recovery
+This project is optimized for "Vibe Coding" and AI-assisted maintenance. In case of a system crash or OS upgrade, provide the contents of [PROMPT.md](./PROMPT.md) to an LLM to restore full functionality without breaking the "Sudo-Aware" architecture.
+
 ## 📦 Requirements
 - `python3`, `fastfetch`, `vnstat`, `fail2ban`, `podman`, `tailscale`
 
 ## 🚀 Execution
+Add this alias to your `.bashrc`:
 ```bash
-# Add this alias to your .bashrc
 alias syscheck='sudo ~/syscheck-project/syscheck'
