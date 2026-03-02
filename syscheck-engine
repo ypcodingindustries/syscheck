@@ -1,89 +1,75 @@
+#!/usr/bin/env python3
 import subprocess, time, os, re, json
-
+from datetime import datetime, timedelta
 def get_output(cmd):
     try:
-        return subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL, text=True).strip()
-    except:
-        return "0"
-
-def get_ext_ip(version="-4"):
-    providers = ["https://icanhazip.com", "https://ifconfig.me"]
-    for url in providers:
-        res = get_output(f"curl {version} -s --connect-timeout 2 {url}")
-        if res and "upstream" not in res and ("." in res or ":" in res):
-            return res
-    return "None"
-
+        return subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL, text=True, timeout=3).strip()
+    except: return "0"
+def get_ext_ip(v="-4"):
+    res = get_output(f"curl {v} -s --connect-timeout 2 https://icanhazip.com")
+    return res if ("." in res or ":" in res) else "None"
 def get_net_bytes(interface="ens3"):
     try:
         with open("/proc/net/dev", "r") as f:
             for line in f:
                 if interface in line:
-                    data = line.split()
-                    return int(data[1]), int(data[9])
-    except:
-        pass
+                    data = line.split(); return int(data[1]), int(data[9])
+    except: pass
     return 0, 0
-
 r1, t1 = get_net_bytes("ens3")
 time.sleep(1)
 r2, t2 = get_net_bytes("ens3")
-rx_s = (r2 - r1) / 1024
-tx_s = (t2 - t1) / 1024
-rx = f"{rx_s:.1f}K" if rx_s < 1024 else f"{rx_s/1024:.1f}M"
-tx = f"{tx_s:.1f}K" if tx_s < 1024 else f"{tx_s/1024:.1f}M"
-
+rx_s, tx_s = (r2 - r1) / 1024, (t2 - t1) / 1024
+rx, tx = (f"{rx_s:.1f}K" if rx_s < 1024 else f"{rx_s/1024:.1f}M"), (f"{tx_s:.1f}K" if tx_s < 1024 else f"{tx_s/1024:.1f}M")
 uptime = get_output("uptime -p").replace("up ", "")
-m_t = int(get_output("free -m | awk '/Mem:/ {print $2}'") or 1)
-m_u = int(get_output("free -m | awk '/Mem:/ {print $3}'") or 0)
+m_t, m_u = int(get_output("free -m | awk '/Mem:/ {print $2}'") or 1), int(get_output("free -m | awk '/Mem:/ {print $3}'") or 0)
 dp = int(get_output("df / | awk 'NR==2 {print $5}'").replace('%', '') or 0)
 ru, rt = get_output("df -h / | awk 'NR==2 {print $3}'"), get_output("df -h / | awk 'NR==2 {print $2}'")
-
 ls_raw = get_output("sudo du -sm /var/log 2>/dev/null | awk '{print $1}'") or "0"
-ls_p = min(int((int(ls_raw) / 2048) * 100), 100)
-ls_str = get_output("sudo du -sh /var/log 2>/dev/null | awk '{print $1}'") or "0B"
-
-ext_v4 = get_ext_ip("-4")
-ext_v6 = get_output("ip -6 addr show ens3 | grep 'scope global' | grep -v 'temporary' | awk '{print $2}' | cut -d/ -f1 | head -n1") or "None"
+ls_p, ls_str = min(int((int(ls_raw) / 2048) * 100), 100), get_output("sudo du -sh /var/log 2>/dev/null | awk '{print $1}'") or "0B"
+ext_v4, ext_v6 = get_ext_ip("-4"), get_output("ip -6 addr show ens3 | grep 'scope global' | awk '{print $2}' | cut -d/ -f1 | head -n1") or "None"
 ts_ip = get_output("tailscale ip -4") or "127.0.0.1"
 vpn = "ACTIVE" if '0.0.0.0/0' in get_output("tailscale status --json") else "INACTIVE"
 ts_p = get_output("tailscale status | grep -c 'active'") or "0"
-
 q_raw = get_output("vnstat -i ens3 -m --oneline").split(';')
 if len(q_raw) > 10:
-    q_s = q_raw[10]
     try:
-        parts = q_s.split()
+        parts = q_raw[10].split()
         val = float(parts[0])
-        if "MiB" in parts[1]: val = val / 1024
-        q_p = int((val / 750) * 100)
-    except:
-        q_p = 0
-else:
-    q_s, q_p = "0 GiB", 0
-
+        if "MiB" in parts[1]: val /= 1024
+        limit = 750
+        rem_gb, q_p = max(0, limit - val), int((val / limit) * 100)
+        now = datetime.now()
+        target = now.replace(day=13, hour=0, minute=0) if now.day < 13 else (now.replace(day=1) + timedelta(days=32)).replace(day=13, hour=0, minute=0)
+        days_rem = max((target - now).total_seconds() / 86400, 0.1)
+        q_s, q_day = f"{val:.1f} GiB", f"{rem_gb / days_rem:.1f} GiB/day"
+    except: q_s, q_day, q_p = "0 GiB", "0 GiB/day", 0
+else: q_s, q_day, q_p = "0 GiB", "0 GiB/day", 0
 sec_raw = get_output("systemd-analyze security vps-security-scan.service --no-pager")
-hv_match = re.search(r"Exposure level.*?:?\s+([0-9.]+)", sec_raw, re.IGNORECASE)
+hv_match = re.search(r"Overall exposure level.*: ([0-9.]+)", sec_raw)
 hv = hv_match.group(1) if hv_match else "N/A"
 ll = get_output("sudo ls -t /var/log/vps-security/scan-*.log 2>/dev/null | head -1 | xargs -n1 basename 2>/dev/null | sed 's/scan-//;s/.log//'") or "N/A"
-
+top_ip = get_output("sudo grep 'Ban ' /var/log/fail2ban.log | awk '{print $NF}' | sort | uniq -c | sort -nr | head -1 | awk '{print $2}'")
+if top_ip and top_ip != "0":
+    top_org = get_output(f"mmdblookup --ip {top_ip} --file /usr/share/GeoIP/GeoLite2-ASN.mmdb autonomous_system_organization 2>/dev/null | grep -o '\".*\"' | head -1 | sed 's/\"//g'")
+    top_threat = top_org if top_org else top_ip
+else: top_threat = "None"
 ag = get_output(f"curl -s -o /dev/null -w '%{{http_code}}' http://{ts_ip}:8080 || echo 500")
 cd = get_output("curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:2019/metrics || echo 500")
 hd = get_output("curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/ || echo 500")
 sd = get_output("systemctl is-active send.service")
-
-# Jitsi Live Stats
-j_stats_raw = get_output("podman exec docker-jitsi-meet_jvb_1 curl -s http://localhost:8080/colibri/stats")
-try:
-    j_data = json.loads(j_stats_raw)
-    j_conf = j_data.get("conferences", 0)
-    j_part = j_data.get("participants", 0)
-    jits_status = f"{j_part} Users ({j_conf} Conf)" if j_part > 0 else "active"
-except:
-    jits_status = "active" if "jvb" in get_output("podman ps --format '{{.Names}}'") else "inactive"
-
+jits_status = "active" if "jvb" in get_output("podman ps --format '{{.Names}}'") else "inactive"
+# Detailed Terraria Stats
+ter_ps = get_output("podman ps -f name=terraria-server --format '{{.Status}}'")
+if "Up" in ter_ps:
+    logs = get_output("podman logs --tail 100 terraria-server")
+    count = max(0, logs.count("has joined.") - logs.count("has left."))
+    load = float(os.getloadavg()[0])
+    fps = 60 if load < 1.5 else max(30, int(60 - (load * 5)))
+    ter_status = f"{count} Users (Med@{fps}fps)"
+else:
+    ter_status = "Offline"
 sshj = get_output("sudo fail2ban-client status sshd | grep 'Currently banned' | awk '{print $NF}'") or "0"
 recj = get_output("sudo fail2ban-client status recidive | grep 'Currently banned' | awk '{print $NF}'") or "0"
 jitj = get_output("sudo fail2ban-client status jitsi-auth | grep 'Currently banned' | awk '{print $NF}'") or "0"
-
-print(f"{m_u}|{m_t}|{dp}|{q_s}|{q_p}|{uptime}|{ext_v4}|{ext_v6}|{ts_ip}|{ts_p}|{vpn}|{rx}|{tx}|{ru}|{rt}|{ls_str}|{ls_p}|{hv}|{ll}|{ag}|{cd}|{hd}|{sd}|{sshj}|{recj}|{jits_status}|{jitj}")
+print(f"{m_u}|{m_t}|{dp}|{q_s}|{q_day}|{q_p}|{uptime}|{ext_v4}|{ext_v6}|{ts_ip}|{ts_p}|{vpn}|{rx}|{tx}|{ru}|{rt}|{ls_str}|{ls_p}|{hv}|{ll}|{ag}|{cd}|{hd}|{sd}|{sshj}|{recj}|{ter_status}|{top_threat}|{jits_status}|{jitj}|Active")
